@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ChevronUp, ChevronDown, Plus, Minus, Equal } from 'lucide-svelte';
 	import { appState } from '$lib/state.svelte';
+	import { sanitizeDiffHtml } from '$lib/utils/sanitize';
 
 	let diffContainer = $state<HTMLDivElement>();
 	let currentChangeIndex = $state(0);
@@ -9,16 +10,18 @@
 
 	function navigateChange(direction: 'prev' | 'next') {
 		if (!diffContainer) return;
-		const changes = diffContainer.querySelectorAll('.d2h-ins, .d2h-del, .d2h-change');
-		if (changes.length === 0) return;
+		const rows = Array.from(diffContainer.querySelectorAll<HTMLElement>('.d2h-diff-tbody > tr')).filter(
+			(tr) => tr.querySelector('.d2h-ins, .d2h-del, .d2h-change')
+		);
+		if (rows.length === 0) return;
 
 		if (direction === 'next') {
-			currentChangeIndex = Math.min(currentChangeIndex + 1, changes.length - 1);
+			currentChangeIndex = Math.min(currentChangeIndex + 1, rows.length - 1);
 		} else {
 			currentChangeIndex = Math.max(currentChangeIndex - 1, 0);
 		}
 
-		changes[currentChangeIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		rows[currentChangeIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	}
 
 	// Handle line highlighting
@@ -99,14 +102,16 @@
 			<!-- Navigation -->
 			<div class="flex items-center gap-1">
 				<button
-					class="p-1 rounded hover:bg-muted transition-colors"
+					type="button"
+					class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
 					onclick={() => navigateChange('prev')}
 					aria-label="Previous change"
 				>
 					<ChevronUp class="h-4 w-4" />
 				</button>
 				<button
-					class="p-1 rounded hover:bg-muted transition-colors"
+					type="button"
+					class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
 					onclick={() => navigateChange('next')}
 					aria-label="Next change"
 				>
@@ -124,7 +129,7 @@
 			style="contain: paint;"
 			onclick={handleLineClick}
 		>
-			{@html diffResult.html}
+			{@html sanitizeDiffHtml(diffResult.html)}
 		</div>
 	</div>
 {/if}

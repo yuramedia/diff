@@ -74,20 +74,34 @@ const GROUP_BLACKLIST = [
 ];
 
 export function guessGroup(filename: string): string {
+    if (!filename || typeof filename !== "string") return "";
+
+    // Cap filename length to prevent catastrophic backtracking on oversized input
+    const safeFilename = filename.length > 300 ? filename.slice(0, 300) : filename;
+
     // Discord-style naming
-    const discordStyle = filename.match(/^([A-Za-z0-9-]+)_[A-Za-z_]+_-_(?:[Ss]\d+)?[Ee]?\d+[_.]/);
+    const discordStyle = safeFilename.match(/^([A-Za-z0-9-]+)_[A-Za-z_]+_-_(?:[Ss]\d+)?[Ee]?\d+[_.]/);
     if (discordStyle) return discordStyle[1];
+
+    // Fast-path standard anime fansub convention: [GroupName] ...
+    const leadingBracket = safeFilename.match(/^\[([^\]]+)\]/);
+    if (leadingBracket) {
+        const cand = leadingBracket[1].trim();
+        if (cand && !GROUP_BLACKLIST.includes(cand.toLowerCase()) && !/^\d{3,4}p$/i.test(cand)) {
+            return cand;
+        }
+    }
 
     // Standard group extraction via regex
     const groupRegex =
         /^\[(?!Japanese)(?:[0-9]+[pP]?|MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|([^[\u4E00-\u9FCC¶^\]]+))\](?!\[).*|^\[(?!Japanese)(?:MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|\d{6}|([^½ \]\u4E00-\u9FCC]+))\].*|.*[a-zA-Z .\]]\[(?:.* Edition|[rR]iff[tT]rax|REMUX|PROPER|MOVIE|DVD(?:[95]|ISO|R).*|BD(?:MV|\d+)|AC3|AAC|.* DVD|[0-9]+[pP]?|.*?26[45]+.*?|[a-f0-9]{8}|[A-F0-9]{8}|.*FLAC|R2[ JFD].*|([^[)+-]+))](?:\[[0-9]+[pP]])$|.*(?:\.|[xhXH]\.?26[45] )(?:REMUX|PROPER|MOVIE|DVD(?:[95]|ISO|-?R)?|BD(?:MV|\d+)|AC3|AAC|FLAC|PAL|NTSC|XVID|DTS|DUB|[xhXH]\.?26[45]|(?![cC][dD]\d|BLURAY)([A-Z]-)?([A-Z][A-Zi0-9]+|[A-Z][a-z][A-Z]|@[a-zA-Z]{2,}))$/g;
 
-    const baseName = filename.replace(/\.[^/.]+$/, "").trim();
+    const baseName = safeFilename.replace(/\.[^/.]+$/, "").trim();
     const groupName = baseName.replace("DTS-HD-", "-").replace(groupRegex, "$1$2$3$4$5");
 
     if (groupName && groupName.length > 0 && !GROUP_BLACKLIST.includes(groupName.toLowerCase())) {
         return groupName;
     }
 
-    return filename.replace(/\.[^/.]+$/, "");
+    return safeFilename.replace(/\.[^/.]+$/, "");
 }

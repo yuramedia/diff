@@ -5,8 +5,7 @@
 	import { extractMkvSubtitles } from '$lib/engine/mkv-parser';
 	import { guessGroup } from '$lib/engine/group-detector';
 	import { hashContent } from '$lib/engine/file-hasher';
-	import { processLines } from '$lib/engine/text-processor';
-	import { computeDiff } from '$lib/engine/diff-engine';
+	import { runDiffPipeline } from '$lib/engine/diff-pipeline';
 	import { SAMPLE_SUBTITLE_A, SAMPLE_SUBTITLE_B } from '$lib/engine/sample-data';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -179,7 +178,7 @@
 					if (eng && ind) {
 						selectTrackForSide('A', eng.hash);
 						selectTrackForSide('B', ind.hash);
-					} else {
+					} else if (trackList.length > 0) {
 						selectTrackForSide(side, trackList[0].hash);
 						if (trackList.length > 1) {
 							const otherSide = side === 'A' ? 'B' : 'A';
@@ -187,13 +186,11 @@
 						}
 					}
 
-					// Keep modal closed by default so user can use the header combobox directly
 					showMkvModal = false;
 
 					if (textA.trim() && textB.trim()) {
 						findDifferences();
 					}
-
 					appState.statusMessage = `Extracted ${subs.length} subtitle track${subs.length > 1 ? 's' : ''} from ${file.name}`;
 				} else {
 					appState.statusMessage = `No text subtitle tracks (ASS/SSA/SRT/VTT) found in ${file.name}. (PGS/VobSub bitmap subtitles are not supported)`;
@@ -203,25 +200,42 @@
 				appState.statusMessage = `Failed to parse ${file.name}: ${err instanceof Error ? err.message : 'Unknown error'}`;
 			}
 		} else {
+			if (file.size > 25 * 1024 * 1024) {
+				appState.statusMessage = `File "${file.name}" exceeds 25MB limit.`;
+				return;
+			}
 			const text = await file.text();
 			await loadContentIntoSide(side, text, file.name);
 		}
 	}
 
+	let inputDebounceTimerA: ReturnType<typeof setTimeout> | undefined;
+	let inputDebounceTimerB: ReturnType<typeof setTimeout> | undefined;
+
 	function handleInputA(val: string) {
 		textA = val;
-		loadContentIntoSide('A', val, 'Input A.txt');
+		clearTimeout(inputDebounceTimerA);
+		inputDebounceTimerA = setTimeout(() => {
+			loadContentIntoSide('A', val, 'Input A.txt');
+		}, 300);
 	}
 
 	function handleInputB(val: string) {
 		textB = val;
-		loadContentIntoSide('B', val, 'Input B.txt');
+		clearTimeout(inputDebounceTimerB);
+		inputDebounceTimerB = setTimeout(() => {
+			loadContentIntoSide('B', val, 'Input B.txt');
+		}, 300);
 	}
 
 	async function pasteSide(side: 'A' | 'B') {
 		try {
 			const clip = await navigator.clipboard.readText();
 			if (clip) {
+				if (clip.length > 10_000_000) {
+					appState.statusMessage = 'Pasted text exceeds safety limit (10MB).';
+					return;
+				}
 				await loadContentIntoSide(side, clip, `Pasted ${side}.txt`);
 			}
 		} catch (err) {
@@ -276,7 +290,8 @@
 		findDifferences();
 	}
 
-	function findDifferences() {
+	async function findDifferences() {
+		if (appState.isComputing) return;
 		if (!textA.trim() || !textB.trim()) {
 			appState.statusMessage = 'Please enter or upload text for both sides to compare.';
 			return;
@@ -285,75 +300,18 @@
 		appState.isComputing = true;
 		appState.statusMessage = '';
 
-		Promise.all([
-			loadContentIntoSide('A', textA, titleA, formatA),
-			loadContentIntoSide('B', textB, titleB, formatB)
-		]).then(() => {
-			const fileA = appState.files.get(appState.fileA!);
-			const fileB = appState.files.get(appState.fileB!);
-			if (!fileA || !fileB) return;
-
-			requestAnimationFrame(() => {
-				try {
-					const processedA = processLines(fileA.data, {
-						...appState.options,
-						excludedStyles: appState.options.excludedStyles,
-						replace: appState.options.replace
-					});
-
-					const processedB = processLines(fileB.data, {
-						...appState.options,
-						excludedStyles: appState.options.excludedStyles,
-						replace: appState.options.replace
-					});
-
-					const linesA = processedA.lines.length > 0
-						? processedA.lines
-						: textA.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-
-					const linesB = processedB.lines.length > 0
-						? processedB.lines
-						: textB.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-
-					if (linesA.length === 0 && linesB.length === 0) {
-						appState.diffResult = {
-							html: '<div class="p-8 text-center text-muted-foreground">Both sides are empty after filtering.</div>',
-							additions: 0, deletions: 0, unchanged: 0, isEmpty: true
-						};
-						appState.isComputing = false;
-						return;
-					}
-
-					const diff = computeDiff(
-						linesA,
-						linesB,
-						fileA.title || 'Original (A)',
-						fileB.title || 'Changed (B)',
-						{
-							outputFormat: appState.diffOutputFormat,
-							matching: appState.diffMatching
-						}
-					);
-
-					if (diff.isEmpty) {
-						appState.diffResult = {
-							html: `<div class="p-12 text-center"><p class="text-xl font-medium text-emerald-500">✓ No differences</p><p class="text-sm text-muted-foreground mt-2">${fileA.title} and ${fileB.title} are identical with current filters.</p></div>`,
-							additions: 0, deletions: 0, unchanged: linesA.length, isEmpty: true
-						};
-					} else {
-						appState.diffResult = diff;
-					}
-				} catch (err) {
-					console.error('Diff error:', err);
-					appState.diffResult = {
-						html: `<div class="p-6 text-center text-destructive">Error generating diff: ${err instanceof Error ? err.message : 'Unknown error'}</div>`,
-						additions: 0, deletions: 0, unchanged: 0, isEmpty: true
-					};
-				} finally {
-					appState.isComputing = false;
-				}
-			});
-		});
+		try {
+			await Promise.all([
+				loadContentIntoSide('A', textA, titleA, formatA),
+				loadContentIntoSide('B', textB, titleB, formatB)
+			]);
+			await runDiffPipeline();
+		} catch (err) {
+			console.error('Diff error:', err);
+			appState.statusMessage = `Diff error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+		} finally {
+			appState.isComputing = false;
+		}
 	}
 </script>
 

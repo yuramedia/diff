@@ -54,30 +54,38 @@ export function processLines(data: Caption[] | undefined | null, options: Proces
     for (const line of data) {
         if (line.type !== "caption") continue;
 
-        // Skip excluded styles
-        if (line.data?.Style && options.excludedStyles?.includes(line.data.Style) && !line.content?.includes("{")) {
+        const lineStyle = line.data?.Style;
+        const isBaseStyleExcluded = Boolean(lineStyle && options.excludedStyles?.includes(lineStyle));
+
+        // Skip excluded styles immediately if no style reset override exists
+        if (isBaseStyleExcluded && (!line.content || !line.content.includes("\\r"))) {
             continue;
         }
 
-        // Remove \\pos lines
+        // Remove \pos lines
         if (options.removePosLines && line.content && /\{[^}]*\\pos/.test(line.content)) continue;
 
-        // Remove \\p (drawing) lines
+        // Remove \p (drawing) lines
         if (options.removeDrawLines && line.content && /\{[^}]*\\p[0-9 .\-\\}]/.test(line.content)) continue;
 
         let text = line.content || line.text || "";
 
-        // Handle style exclusions with \\r overrides
-        if (options.excludedStyles.length > 0 && line.content.includes("{")) {
+        // Cap maximum line length to prevent evil regex pathological backtracking
+        if (text.length > 20_000) {
+            text = text.slice(0, 20_000);
+        }
+
+        // Handle style exclusions with \r overrides
+        if (options.excludedStyles?.length > 0 && line.content?.includes("\\r")) {
             const matches = [...line.content.matchAll(/\{[^}]*\\r([^\\}]*)[^}]*\}/g)];
             if (matches.length > 0) {
                 const sp = line.content.split(/\{[^}]*\\r[^\\}]*[^}]*\}/g);
-                let newText = sp[0] || "";
+                let newText = isBaseStyleExcluded ? "" : sp[0] || "";
 
                 for (let i = 0; i < matches.length; i++) {
-                    let effectiveStyle = matches[i][1];
-                    if (line.data?.Style && effectiveStyle === "") {
-                        effectiveStyle = line.data.Style;
+                    let effectiveStyle = matches[i][1]?.trim();
+                    if (!effectiveStyle && lineStyle) {
+                        effectiveStyle = lineStyle;
                     }
                     if (!options.excludedStyles.includes(effectiveStyle)) {
                         newText += matches[i][0] + (sp[i + 1] || "");
@@ -90,11 +98,8 @@ export function processLines(data: Caption[] | undefined | null, options: Proces
         // Always apply thorough tag cleaning when stripTags is enabled
         if (options.stripTags) {
             text = text
-                // Strip drawing commands: {\p1}...{\p0}
-                .replace(
-                    /\{[^}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3})[^}]*\}.*?\{[^}]*\\p0.*?(?<!\\p1)\}|\{[^}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3}).*$/g,
-                    ""
-                )
+                // Strip drawing commands: {\p1}...{\p0} or unclosed {\p1}...
+                .replace(/\{[^}]*\\p[1-9]\d*[^}]*\}[\s\S]*?(?:\{[^}]*\\p0[^}]*\}|$)/g, "")
                 // Strip all ASS override tags and comments in curly brackets: { ... }
                 .replace(/\{[^}]*\}/g, "")
                 // Strip HTML tags: <i>, <b>, <u>, <font...>, etc.
@@ -113,17 +118,17 @@ export function processLines(data: Caption[] | undefined | null, options: Proces
                 .replace(/…/g, "...");
         }
 
-        // Remove special characters
-        if (options.removeSpecialCharacters) {
-            text = text.replace(/[.,/#!$%^&*;:{}=\-_`~()…?–—]/g, "");
-        }
-
-        // Remove honorifics
-        if (options.removeHonorifics) {
+        // Remove honorifics BEFORE removing special characters so leading hyphens match
+        if (options.removeHonorifics || options.ignoreHonorifics) {
             text = text.replace(
                 /\b-(?:san|sama|kun|chan|tan|senpai|sensei|kohai|hakase|neechan|oneesan|oneesama|oneechan|onichan|onisan|obasan|oobasan|neesan|aneki|aniki|zeki|han|niichan|dono|ojosama|niisan|oniisama|ojisan|nee|nii)\b/gi,
                 ""
             );
+        }
+
+        // Remove special characters / punctuation
+        if (options.removeSpecialCharacters || options.ignorePunctuation) {
+            text = text.replace(/[.,/#!$%^&*;:{}=\-_`~()…?–—]/g, "");
         }
 
         // Normalize whitespace
@@ -136,9 +141,12 @@ export function processLines(data: Caption[] | undefined | null, options: Proces
         // Remove empty lines (after stripping tags & normalizing whitespace)
         if (options.removeEmptyLines && text === "") continue;
 
-        // Custom replacements
-        for (const rep in options.replace) {
-            text = text.replaceAll(rep, options.replace[rep]);
+        // Custom replacements (guard against empty string replacement key)
+        if (options.replace && typeof options.replace === "object") {
+            for (const rep in options.replace) {
+                if (rep.length === 0) continue;
+                text = text.replaceAll(rep, options.replace[rep]);
+            }
         }
 
         // Lower case
@@ -146,10 +154,15 @@ export function processLines(data: Caption[] | undefined | null, options: Proces
             text = text.toLowerCase();
         }
 
-        // Merge duplicate lines
-        if (lines[lines.length - 1] === text) {
+        // Merge duplicate lines / alpha timing (guarded against empty lines array)
+        if (lines.length > 0 && lines[lines.length - 1] === text) {
             if (options.mergeDuplicateLines) continue;
-        } else if (options.mergeAlphaTiming && text.startsWith(lines[lines.length - 1] || "")) {
+        } else if (
+            options.mergeAlphaTiming &&
+            lines.length > 0 &&
+            lines[lines.length - 1] !== "" &&
+            text.startsWith(lines[lines.length - 1])
+        ) {
             lines[lines.length - 1] = text;
             continue;
         }

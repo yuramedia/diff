@@ -141,6 +141,13 @@
     position: relative !important;
 }
 
+.d2h-file-diff {
+    width: 100% !important;
+    position: relative !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+}
+
 .d2h-file-side-diff {
     display: inline-block !important;
     width: 50% !important;
@@ -165,23 +172,66 @@
     position: relative !important;
 }
 
-/* Force linenumbers to be standard table-cell aligned with code text */
-.d2h-code-side-linenumber,
-.d2h-code-linenumber {
+/* Side-by-side linenumbers: single column per side */
+.d2h-code-side-linenumber {
     position: static !important;
     display: table-cell !important;
-    width: 3.5em !important;
-    min-width: 3.5em !important;
-    max-width: 3.5em !important;
+    width: 3.6em !important;
+    min-width: 3.6em !important;
+    max-width: 3.6em !important;
     box-sizing: border-box !important;
     direction: ltr !important;
     text-align: right !important;
     vertical-align: top !important;
     padding: 2px 6px 2px 2px !important;
-    line-height: 1.4 !important;
+    line-height: 18px !important;
     font-size: 11px !important;
     user-select: none !important;
     opacity: 0.7;
+}
+
+/* Unified (line-by-line) linenumbers: dual columns (old # and new # side-by-side) */
+.d2h-code-linenumber {
+    position: static !important;
+    display: table-cell !important;
+    width: 7.6em !important;
+    min-width: 7.6em !important;
+    max-width: 7.6em !important;
+    box-sizing: border-box !important;
+    direction: ltr !important;
+    vertical-align: top !important;
+    padding: 2px 0 !important;
+    line-height: 18px !important;
+    font-size: 11px !important;
+    user-select: none !important;
+    white-space: nowrap !important;
+    opacity: 0.8;
+}
+
+.d2h-code-linenumber .line-num1,
+.d2h-code-linenumber .line-num2 {
+    display: inline-block !important;
+    width: 3.6em !important;
+    min-width: 3.6em !important;
+    max-width: 3.6em !important;
+    min-height: 18px !important;
+    box-sizing: border-box !important;
+    text-align: right !important;
+    padding: 0 4px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    line-height: 18px !important;
+    vertical-align: top !important;
+}
+
+.d2h-code-linenumber .line-num1 {
+    float: left !important;
+    border-right: 1px dashed var(--border) !important;
+}
+
+.d2h-code-linenumber .line-num2 {
+    float: right !important;
 }
 
 .d2h-diff-tbody > tr > td {
@@ -198,7 +248,7 @@
     padding: 2px 4px !important;
     width: 100% !important;
     box-sizing: border-box !important;
-    line-height: 1.4 !important;
+    line-height: 18px !important;
 }
 
 .d2h-code-line-prefix {
@@ -211,7 +261,7 @@
     user-select: none !important;
     font-weight: 700 !important;
     opacity: 0.8 !important;
-    line-height: 1.4 !important;
+    line-height: 18px !important;
 }
 
 .d2h-code-line-ctn {
@@ -222,7 +272,7 @@
     white-space: pre-wrap !important;
     word-break: break-word !important;
     unicode-bidi: plaintext !important;
-    line-height: 1.4 !important;
+    line-height: 18px !important;
 }
 
 .d2h-code-line del,
@@ -239,77 +289,228 @@
     min-height: 20px !important;
 }
 
+/* diff2html light theme defaults and variable mappings */
+.d2h-wrapper {
+    --d2h-bg-color: var(--card);
+    --d2h-border-color: var(--border);
+    --d2h-change-del-color: var(--diff-removed-bg);
+    --d2h-change-ins-color: var(--diff-added-bg);
+    --d2h-del-bg-color: var(--diff-removed-bg);
+    --d2h-ins-bg-color: var(--diff-added-bg);
+    --d2h-del-highlight-bg-color: var(--diff-removed-highlight);
+    --d2h-ins-highlight-bg-color: var(--diff-added-highlight);
+    --d2h-del-label-color: var(--diff-removed-fg);
+    --d2h-ins-label-color: var(--diff-added-fg);
+}
+
+.d2h-file-header,
+.d2h-file-wrapper {
+    border-color: var(--border) !important;
+}
+
+.d2h-diff-table {
+    background: var(--card) !important;
+    color: var(--foreground) !important;
+}
+
+.d2h-code-side-linenumber,
+.d2h-code-linenumber {
+    background: var(--muted) !important;
+    color: var(--muted-foreground) !important;
+    border-color: var(--border) !important;
+}
+
+.d2h-emptyplaceholder,
+.d2h-empty-placeholder,
+.d2h-code-side-emptyplaceholder {
+    background: var(--muted) !important;
+    border-color: var(--border) !important;
+}
+
+/* All deleted lines (unified & side-by-side, standalone & change blocks) */
+.d2h-del,
+.d2h-del.d2h-change,
+.d2h-file-diff .d2h-del.d2h-change,
+.d2h-file-diff tr.d2h-del,
+.d2h-file-diff td.d2h-del,
+.d2h-file-diff .d2h-del {
+    background-color: var(--diff-removed-bg) !important;
+    border-color: transparent !important;
+}
+
+/* All inserted lines (unified & side-by-side, standalone & change blocks) */
+.d2h-ins,
+.d2h-ins.d2h-change,
+.d2h-file-diff .d2h-ins.d2h-change,
+.d2h-file-diff tr.d2h-ins,
+.d2h-file-diff td.d2h-ins,
+.d2h-file-diff .d2h-ins {
+    background-color: var(--diff-added-bg) !important;
+    border-color: transparent !important;
+}
+
+/* Linenumber highlights for deleted lines */
+.d2h-code-linenumber.d2h-del,
+.d2h-code-side-linenumber.d2h-del,
+.d2h-del .d2h-code-linenumber,
+.d2h-del .d2h-code-side-linenumber,
+.d2h-file-diff .d2h-code-linenumber.d2h-del,
+.d2h-file-diff .d2h-del .d2h-code-linenumber {
+    background-color: var(--diff-removed-bg) !important;
+    color: var(--diff-removed-fg) !important;
+}
+
+/* Linenumber highlights for inserted lines */
+.d2h-code-linenumber.d2h-ins,
+.d2h-code-side-linenumber.d2h-ins,
+.d2h-ins .d2h-code-linenumber,
+.d2h-ins .d2h-code-side-linenumber,
+.d2h-file-diff .d2h-code-linenumber.d2h-ins,
+.d2h-file-diff .d2h-ins .d2h-code-linenumber {
+    background-color: var(--diff-added-bg) !important;
+    color: var(--diff-added-fg) !important;
+}
+
+del,
+.d2h-code-line del,
+.d2h-code-side-line del {
+    background-color: var(--diff-removed-highlight) !important;
+    color: var(--diff-removed-fg) !important;
+}
+
+ins,
+.d2h-code-line ins,
+.d2h-code-side-line ins {
+    background-color: var(--diff-added-highlight) !important;
+    color: var(--diff-added-fg) !important;
+}
+
+.d2h-info,
+.d2h-code-linenumber.d2h-info,
+.d2h-code-side-linenumber.d2h-info,
+.d2h-file-diff .d2h-info,
+.d2h-file-diff .d2h-code-linenumber.d2h-info {
+    background: var(--muted) !important;
+    color: var(--muted-foreground) !important;
+    border-top: 1px solid var(--border) !important;
+    border-bottom: 1px solid var(--border) !important;
+    border-left: none !important;
+    border-right: none !important;
+}
+
+.d2h-file-header {
+    background: var(--muted) !important;
+    color: var(--foreground) !important;
+}
+
 /* diff2html dark mode overrides */
 .dark .d2h-wrapper {
     --d2h-bg-color: var(--card);
     --d2h-border-color: var(--border);
+    --d2h-change-del-color: var(--diff-removed-bg);
+    --d2h-change-ins-color: var(--diff-added-bg);
+    --d2h-del-bg-color: var(--diff-removed-bg);
+    --d2h-ins-bg-color: var(--diff-added-bg);
+    --d2h-del-highlight-bg-color: var(--diff-removed-highlight);
+    --d2h-ins-highlight-bg-color: var(--diff-added-highlight);
+    --d2h-del-label-color: var(--diff-removed-fg);
+    --d2h-ins-label-color: var(--diff-added-fg);
 }
 
 .dark .d2h-file-header,
 .dark .d2h-file-wrapper {
-    border-color: var(--border);
+    border-color: var(--border) !important;
 }
 
 .dark .d2h-diff-table {
-    background: var(--card);
-    color: var(--foreground);
+    background: var(--card) !important;
+    color: var(--foreground) !important;
 }
 
 .dark .d2h-code-side-linenumber,
 .dark .d2h-code-linenumber {
-    background: var(--muted);
-    color: var(--muted-foreground);
-    border-color: var(--border);
+    background: var(--muted) !important;
+    color: var(--muted-foreground) !important;
+    border-color: var(--border) !important;
 }
 
 .dark .d2h-emptyplaceholder,
 .dark .d2h-empty-placeholder,
 .dark .d2h-code-side-emptyplaceholder {
-    background: var(--muted);
-    border-color: var(--border);
+    background: var(--muted) !important;
+    border-color: var(--border) !important;
 }
 
-.dark .d2h-del {
-    background-color: var(--diff-removed-bg);
-    border-color: var(--diff-removed-bg);
+.dark .d2h-del,
+.dark .d2h-del.d2h-change,
+.dark .d2h-file-diff .d2h-del.d2h-change,
+.dark .d2h-file-diff tr.d2h-del,
+.dark .d2h-file-diff td.d2h-del,
+.dark .d2h-file-diff .d2h-del {
+    background-color: var(--diff-removed-bg) !important;
+    border-color: transparent !important;
 }
 
-.dark .d2h-ins {
-    background-color: var(--diff-added-bg);
-    border-color: var(--diff-added-bg);
+.dark .d2h-ins,
+.dark .d2h-ins.d2h-change,
+.dark .d2h-file-diff .d2h-ins.d2h-change,
+.dark .d2h-file-diff tr.d2h-ins,
+.dark .d2h-file-diff td.d2h-ins,
+.dark .d2h-file-diff .d2h-ins {
+    background-color: var(--diff-added-bg) !important;
+    border-color: transparent !important;
 }
 
+.dark .d2h-code-linenumber.d2h-del,
+.dark .d2h-code-side-linenumber.d2h-del,
+.dark .d2h-del .d2h-code-linenumber,
 .dark .d2h-del .d2h-code-side-linenumber,
-.dark .d2h-del .d2h-code-linenumber {
-    background-color: var(--diff-removed-highlight);
-    color: var(--diff-removed-fg);
+.dark .d2h-file-diff .d2h-code-linenumber.d2h-del,
+.dark .d2h-file-diff .d2h-del .d2h-code-linenumber {
+    background-color: var(--diff-removed-highlight) !important;
+    color: var(--diff-removed-fg) !important;
 }
 
+.dark .d2h-code-linenumber.d2h-ins,
+.dark .d2h-code-side-linenumber.d2h-ins,
+.dark .d2h-ins .d2h-code-linenumber,
 .dark .d2h-ins .d2h-code-side-linenumber,
-.dark .d2h-ins .d2h-code-linenumber {
-    background-color: var(--diff-added-highlight);
-    color: var(--diff-added-fg);
+.dark .d2h-file-diff .d2h-code-linenumber.d2h-ins,
+.dark .d2h-file-diff .d2h-ins .d2h-code-linenumber {
+    background-color: var(--diff-added-highlight) !important;
+    color: var(--diff-added-fg) !important;
 }
 
-.dark del {
-    background-color: var(--diff-removed-highlight);
-    color: var(--diff-removed-fg);
+.dark del,
+.dark .d2h-code-line del,
+.dark .d2h-code-side-line del {
+    background-color: var(--diff-removed-highlight) !important;
+    color: var(--diff-removed-fg) !important;
 }
 
-.dark ins {
-    background-color: var(--diff-added-highlight);
-    color: var(--diff-added-fg);
+.dark ins,
+.dark .d2h-code-line ins,
+.dark .d2h-code-side-line ins {
+    background-color: var(--diff-added-highlight) !important;
+    color: var(--diff-added-fg) !important;
 }
 
-.dark .d2h-info {
-    background: var(--muted);
-    color: var(--muted-foreground);
-    border-color: var(--border);
+.dark .d2h-info,
+.dark .d2h-code-linenumber.d2h-info,
+.dark .d2h-code-side-linenumber.d2h-info,
+.dark .d2h-file-diff .d2h-info,
+.dark .d2h-file-diff .d2h-code-linenumber.d2h-info {
+    background: var(--muted) !important;
+    color: var(--muted-foreground) !important;
+    border-top: 1px solid var(--border) !important;
+    border-bottom: 1px solid var(--border) !important;
+    border-left: none !important;
+    border-right: none !important;
 }
 
 .dark .d2h-file-header {
-    background: var(--muted);
-    color: var(--foreground);
+    background: var(--muted) !important;
+    color: var(--foreground) !important;
 }
 
 /* Line highlight */

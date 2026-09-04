@@ -15,4 +15,8 @@ declare module "*?raw" {
     export default content;
 }
 
+declare const process: {
+    env: Record<string, string | undefined>;
+};
+
 export {};

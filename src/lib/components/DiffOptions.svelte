@@ -5,8 +5,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Collapsible from '$lib/components/ui/collapsible';
 	import { Button } from '$lib/components/ui/button';
-	import { processLines } from '$lib/engine/text-processor';
-	import { computeDiff } from '$lib/engine/diff-engine';
+	import { runDiffPipeline } from '$lib/engine/diff-pipeline';
 
 	let isOpen = $state(true);
 
@@ -26,40 +25,12 @@
 
 	function recomputeDiffIfActive() {
 		if (!appState.diffResult || !appState.fileA || !appState.fileB) return;
-		const fileA = appState.files.get(appState.fileA);
-		const fileB = appState.files.get(appState.fileB);
-		if (!fileA || !fileB) return;
-
-		try {
-			const processedA = processLines(fileA.data, {
-				...appState.options,
-				excludedStyles: appState.options.excludedStyles,
-				replace: appState.options.replace
-			});
-
-			const processedB = processLines(fileB.data, {
-				...appState.options,
-				excludedStyles: appState.options.excludedStyles,
-				replace: appState.options.replace
-			});
-
-			appState.diffResult = computeDiff(
-				processedA.lines,
-				processedB.lines,
-				fileA.title,
-				fileB.title,
-				{
-					outputFormat: appState.diffOutputFormat,
-					matching: appState.diffMatching
-				}
-			);
-		} catch (err) {
-			console.error('Recompute error:', err);
-		}
+		runDiffPipeline();
 	}
 
 	function toggleOption(key: keyof typeof appState.options) {
-		(appState.options as Record<string, boolean>)[key] = !(appState.options as Record<string, boolean>)[key];
+		const opts = appState.options as unknown as Record<string, boolean>;
+		opts[key] = !opts[key];
 		recomputeDiffIfActive();
 	}
 
@@ -107,14 +78,12 @@
 
 <Collapsible.Root bind:open={isOpen}>
 	<div class="flex items-center justify-between">
-		<Collapsible.Trigger asChild>
-			<Button variant="ghost" size="sm" class="justify-between text-foreground hover:bg-muted/60 gap-2 font-medium px-2">
-				<span class="flex items-center gap-2">
-					<Settings2 class="h-4 w-4 text-indigo-500" />
-					<span class="text-xs font-semibold">Processing & Subtitle Filters</span>
-				</span>
-				<ChevronDown class="h-3.5 w-3.5 transition-transform duration-200 {isOpen ? 'rotate-180' : ''}" />
-			</Button>
+		<Collapsible.Trigger class="inline-flex items-center justify-between rounded-md text-sm font-medium hover:bg-muted/60 gap-2 px-2 py-1 text-foreground transition-colors cursor-pointer">
+			<span class="flex items-center gap-2">
+				<Settings2 class="h-4 w-4 text-indigo-500" />
+				<span class="text-xs font-semibold">Processing & Subtitle Filters</span>
+			</span>
+			<ChevronDown class="h-3.5 w-3.5 transition-transform duration-200 {isOpen ? 'rotate-180' : ''}" />
 		</Collapsible.Trigger>
 
 		<!-- Presets -->

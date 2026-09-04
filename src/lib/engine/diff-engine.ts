@@ -1,8 +1,8 @@
-/**
- * Diff engine using jsdiff + diff2html.
- */
 import { createTwoFilesPatch } from "diff";
 import { html as diff2htmlHtml } from "diff2html";
+import { sanitizeDiffHtml, sanitizePatchHeader } from "../utils/sanitize";
+
+export const MAX_DIFF_LINES = 20_000;
 
 export interface DiffOptions {
     matching?: "words" | "lines" | "none";
@@ -16,6 +16,7 @@ export interface DiffResult {
     deletions: number;
     unchanged: number;
     isEmpty: boolean;
+    isTruncated?: boolean;
 }
 
 export function computeDiff(
@@ -25,20 +26,37 @@ export function computeDiff(
     titleB: string = "Changed",
     options: DiffOptions = {}
 ): DiffResult {
-    const textA = Array.isArray(inputA)
-        ? inputA.join("\n")
+    let linesA = Array.isArray(inputA)
+        ? [...inputA]
         : typeof inputA === "string"
-          ? inputA
-          : String(inputA ?? "");
+          ? inputA.length === 0
+              ? []
+              : inputA.split(/\r?\n/)
+          : [];
 
-    const textB = Array.isArray(inputB)
-        ? inputB.join("\n")
+    let linesB = Array.isArray(inputB)
+        ? [...inputB]
         : typeof inputB === "string"
-          ? inputB
-          : String(inputB ?? "");
+          ? inputB.length === 0
+              ? []
+              : inputB.split(/\r?\n/)
+          : [];
 
-    const countA = Array.isArray(inputA) ? inputA.length : textA.split(/\r?\n/).length;
-    const countB = Array.isArray(inputB) ? inputB.length : textB.split(/\r?\n/).length;
+    let isTruncated = false;
+    if (linesA.length > MAX_DIFF_LINES) {
+        linesA = linesA.slice(0, MAX_DIFF_LINES);
+        isTruncated = true;
+    }
+    if (linesB.length > MAX_DIFF_LINES) {
+        linesB = linesB.slice(0, MAX_DIFF_LINES);
+        isTruncated = true;
+    }
+
+    const textA = linesA.join("\n");
+    const textB = linesB.join("\n");
+
+    const countA = linesA.length;
+    const countB = linesB.length;
 
     if (textA === textB) {
         return {
@@ -46,23 +64,35 @@ export function computeDiff(
             additions: 0,
             deletions: 0,
             unchanged: countA,
-            isEmpty: true
+            isEmpty: true,
+            isTruncated
         };
     }
 
-    const patch = createTwoFilesPatch(titleA, titleB, textA, textB, "", "", {
+    const cleanTitleA = sanitizePatchHeader(titleA) || "Original";
+    const cleanTitleB = sanitizePatchHeader(titleB) || "Changed";
+
+    const patch = createTwoFilesPatch(cleanTitleA, cleanTitleB, textA, textB, "", "", {
         context: 3
     });
 
     const matchStyle = options.matching || options.diffStyle || "words";
     const outputFormat = options.outputFormat || "side-by-side";
 
-    const html = diff2htmlHtml(patch, {
+    const rawHtml = diff2htmlHtml(patch, {
         matching: matchStyle === "words" ? "words" : matchStyle === "lines" ? "lines" : "none",
         outputFormat: outputFormat,
         drawFileList: false,
         rawTemplates: {}
     });
+
+    const sanitizedHtml = sanitizeDiffHtml(rawHtml);
+
+    const bannerHtml = isTruncated
+        ? `<div class="mb-3 p-3 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 rounded-md text-xs font-medium">
+             ⚠️ File exceeds the maximum comparison limit of ${MAX_DIFF_LINES.toLocaleString()} lines. Content was truncated to prevent browser UI lockup.
+           </div>`
+        : "";
 
     // Count changes
     let additions = 0;
@@ -75,10 +105,11 @@ export function computeDiff(
     const unchanged = Math.max(countA, countB) - Math.max(additions, deletions);
 
     return {
-        html,
+        html: bannerHtml + sanitizedHtml,
         additions,
         deletions,
         unchanged: Math.max(0, unchanged),
-        isEmpty: false
+        isEmpty: false,
+        isTruncated
     };
 }

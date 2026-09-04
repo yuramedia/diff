@@ -4,12 +4,24 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="text-scale" content="scale" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; worker-src 'self' blob:;"
+        />
         <title>Diff — Advanced Subtitle & Text Comparison</title>
         <meta
             name="description"
             content="Advanced browser-based subtitle and text diff tool. Supports .ass, .srt, .vtt, .txt, .mkv extraction, fansub group detection, SSA/ASS tag stripping, side-by-side view, and image export."
         />
         <link rel="icon" href="%sveltekit.assets%/favicon.svg" />
+        <script>
+            try {
+                var t = localStorage.getItem("diff-theme");
+                if (t === "dark" || (!t && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+                    document.documentElement.classList.add("dark");
+                }
+            } catch (e) {}
+        </script>
         %sveltekit.head%
     </head>
     <body data-sveltekit-preload-data="hover">

@@ -3,6 +3,8 @@ import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
+declare const process: { env: Record<string, string | undefined> };
+
 export default defineConfig({
     plugins: [
         tailwindcss(),
@@ -18,7 +20,7 @@ export default defineConfig({
                 strict: true
             }),
             paths: {
-                base: process.env.BASE_PATH || ""
+                base: (process.env.BASE_PATH || "") as "" | `/${string}`
             }
         })
     ]

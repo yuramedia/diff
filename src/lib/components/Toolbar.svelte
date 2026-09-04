@@ -1,230 +1,154 @@
 <script lang="ts">
-	import {
-		ArrowLeftRight,
-		Trash2,
-		ImageDown,
-		GitCompareArrows,
-		Loader2,
-		ChevronDown,
-		FileCode,
-		FileText,
-		Download
-	} from 'lucide-svelte';
-	import { appState } from '$lib/state.svelte';
-	import { processLines } from '$lib/engine/text-processor';
-	import { computeDiff } from '$lib/engine/diff-engine';
-	import { Button } from '$lib/components/ui/button';
-	import diff2htmlRawCss from 'diff2html/bundles/css/diff2html.min.css?raw';
+  import {
+    ArrowLeftRight,
+    Trash2,
+    ImageDown,
+    GitCompareArrows,
+    Loader2,
+    ChevronDown,
+    FileCode,
+    FileText,
+    Download,
+  } from "lucide-svelte";
+  import { appState } from "$lib/state.svelte";
+  import { processLines } from "$lib/engine/text-processor";
+  import { runDiffPipeline } from "$lib/engine/diff-pipeline";
+  import {
+    escapeHtml,
+    sanitizeDiffHtml,
+    sanitizePatchHeader,
+  } from "$lib/utils/sanitize";
+  import { Button } from "$lib/components/ui/button";
+  import diff2htmlRawCss from "diff2html/bundles/css/diff2html.min.css?raw";
 
-	let showExportMenu = $state(false);
-	let isExporting = $state(false);
-	let exportMenuRef = $state<HTMLDivElement>();
+  let showExportMenu = $state(false);
+  let isExporting = $state(false);
+  let exportMenuRef = $state<HTMLDivElement>();
 
-	function swapFiles() {
-		const temp = appState.fileA;
-		appState.fileA = appState.fileB;
-		appState.fileB = temp;
-	}
+  function swapFiles() {
+    const temp = appState.fileA;
+    appState.fileA = appState.fileB;
+    appState.fileB = temp;
+  }
 
-	function clearAll() {
-		appState.files.clear();
-		appState.fileA = null;
-		appState.fileB = null;
-		appState.diffResult = null;
-	}
+  function clearAll() {
+    appState.files.clear();
+    appState.fileA = null;
+    appState.fileB = null;
+    appState.diffResult = null;
+  }
 
-	function makeErrorHtml(message: string): string {
-		return '<div class="p-4 text-center text-muted-foreground">' + message + '</div>';
-	}
+  function findDifferences() {
+    runDiffPipeline();
+  }
 
-	function makeNoDiffHtml(titleA: string, titleB: string): string {
-		return '<div class="p-8 text-center"><p class="text-lg font-medium text-emerald-600 dark:text-emerald-400">✓ No differences</p><p class="text-sm text-muted-foreground mt-1">' + titleA + ' and ' + titleB + ' are identical after processing.</p></div>';
-	}
+  /**
+   * Export Full Image (PNG):
+   * Captures the COMPLETE height of the diff table, eliminating truncation.
+   */
+  async function exportFullImage() {
+    showExportMenu = false;
+    const diffEl = document.querySelector(".diff-output") as HTMLElement;
+    if (!diffEl) return;
 
-	function findDifferences() {
-		if (!appState.fileA || !appState.fileB) return;
+    isExporting = true;
+    appState.statusMessage = "Rendering full-length PNG image (all lines)...";
 
-		const fileA = appState.files.get(appState.fileA);
-		const fileB = appState.files.get(appState.fileB);
-		if (!fileA || !fileB) return;
+    // Save current constraints
+    const origMaxHeight = diffEl.style.maxHeight;
+    const origHeight = diffEl.style.height;
+    const origOverflow = diffEl.style.overflow;
+    const origContain = diffEl.style.contain;
 
-		appState.isComputing = true;
+    try {
+      // Temporarily expand diff container to its full natural scroll height
+      diffEl.style.maxHeight = "none";
+      diffEl.style.height = "auto";
+      diffEl.style.overflow = "visible";
+      diffEl.style.contain = "none";
 
-		requestAnimationFrame(() => {
-			try {
-				const processedA = processLines(fileA.data, {
-					...appState.options,
-					excludedStyles: appState.options.excludedStyles,
-					replace: appState.options.replace
-				});
+      // Give DOM a tick to layout
+      await new Promise((r) => setTimeout(r, 60));
 
-				const processedB = processLines(fileB.data, {
-					...appState.options,
-					excludedStyles: appState.options.excludedStyles,
-					replace: appState.options.replace
-				});
+      const rawHeight = diffEl.scrollHeight;
+      // Guard against maximum canvas dimensions (16384px in Chromium/Safari)
+      const fullHeight = Math.min(rawHeight, 16000);
+      const fullWidth = Math.max(diffEl.scrollWidth, 1100);
+      const pixelRatio = rawHeight > 8000 ? 1 : 1.5;
+      const isDark = document.documentElement.classList.contains("dark");
 
-				if (processedA.lines.length === 0 && processedB.lines.length === 0) {
-					appState.diffResult = {
-						html: makeErrorHtml('Both files are empty after processing.'),
-						additions: 0, deletions: 0, unchanged: 0, isEmpty: true
-					};
-					appState.isComputing = false;
-					return;
-				}
+      const { toPng } = await import("html-to-image");
+      const dataUrl = await toPng(diffEl, {
+        quality: 1,
+        pixelRatio,
+        height: fullHeight,
+        width: fullWidth,
+        backgroundColor: isDark ? "#141416" : "#ffffff",
+        style: {
+          maxHeight: "none",
+          height: `${fullHeight}px`,
+          overflow: "visible",
+          contain: "none",
+        },
+      });
 
-				if (processedA.lines.length === 0) {
-					appState.diffResult = {
-						html: makeErrorHtml('File "' + fileA.title + '" is empty after filtering.'),
-						additions: 0, deletions: 0, unchanged: 0, isEmpty: true
-					};
-					appState.isComputing = false;
-					return;
-				}
+      const fileA = appState.fileA ? appState.files.get(appState.fileA) : null;
+      const fileB = appState.fileB ? appState.files.get(appState.fileB) : null;
+      const titleA = fileA?.title || "Original";
+      const titleB = fileB?.title || "Changed";
+      const cleanName = `${titleA}_vs_${titleB}`.replace(
+        /[^a-zA-Z0-9_-]/g,
+        "_",
+      );
 
-				if (processedB.lines.length === 0) {
-					appState.diffResult = {
-						html: makeErrorHtml('File "' + fileB.title + '" is empty after filtering.'),
-						additions: 0, deletions: 0, unchanged: 0, isEmpty: true
-					};
-					appState.isComputing = false;
-					return;
-				}
+      const link = document.createElement("a");
+      link.download = `diff_${cleanName}_full.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
 
-				const result = computeDiff(
-					processedA.lines,
-					processedB.lines,
-					fileA.title,
-					fileB.title,
-					{
-						matching: appState.diffMatching,
-						outputFormat: appState.diffOutputFormat
-					}
-				);
+      appState.statusMessage = "Full diff image downloaded successfully!";
+    } catch (err) {
+      console.error("Export error:", err);
+      appState.statusMessage =
+        "Export failed: " +
+        (err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      // Restore scrollable constraints
+      diffEl.style.maxHeight = origMaxHeight;
+      diffEl.style.height = origHeight;
+      diffEl.style.overflow = origOverflow;
+      diffEl.style.contain = origContain;
+      isExporting = false;
+    }
+  }
 
-				if (result.isEmpty) {
-					appState.diffResult = {
-						html: makeNoDiffHtml(fileA.title, fileB.title),
-						additions: 0, deletions: 0,
-						unchanged: processedA.lines.length,
-						isEmpty: true
-					};
-				} else {
-					appState.diffResult = result;
-				}
-			} catch (err) {
-				console.error('Diff computation error:', err);
-				appState.diffResult = {
-					html: makeErrorHtml('Error computing diff: ' + (err as Error).message),
-					additions: 0, deletions: 0, unchanged: 0, isEmpty: true
-				};
-			} finally {
-				appState.isComputing = false;
-			}
-		});
-	}
+  /**
+   * Export Standalone HTML (.html):
+   * Self-contained HTML report with embedded styles, clean GitHub-grade theme, and no watermarks.
+   */
+  function exportFullHtml() {
+    showExportMenu = false;
+    if (!appState.diffResult) return;
 
-	/**
-	 * Export Full Image (PNG):
-	 * Captures the COMPLETE height of the diff table, eliminating truncation.
-	 */
-	async function exportFullImage() {
-		showExportMenu = false;
-		const diffEl = document.querySelector('.diff-output') as HTMLElement;
-		if (!diffEl) return;
+    const fileA = appState.fileA ? appState.files.get(appState.fileA) : null;
+    const fileB = appState.fileB ? appState.files.get(appState.fileB) : null;
+    const titleA = fileA?.title || "Original (A)";
+    const titleB = fileB?.title || "Changed (B)";
+    const isDark = document.documentElement.classList.contains("dark");
+    const isSideBySide = appState.diffOutputFormat !== "line-by-line";
 
-		isExporting = true;
-		appState.statusMessage = 'Rendering full-length PNG image (all lines)...';
+    // Clean up diff2html output: remove hardcoded light/dark scheme classes and sanitize with DOMPurify
+    const cleanedDiffHtml = sanitizeDiffHtml(
+      appState.diffResult.html.replace(
+        /\bd2h-(?:light|dark|auto)-color-scheme\b/g,
+        "",
+      ),
+    );
 
-		// Save current constraints
-		const origMaxHeight = diffEl.style.maxHeight;
-		const origHeight = diffEl.style.height;
-		const origOverflow = diffEl.style.overflow;
-		const origContain = diffEl.style.contain;
-
-		try {
-			// Temporarily expand diff container to its full natural scroll height
-			diffEl.style.maxHeight = 'none';
-			diffEl.style.height = 'auto';
-			diffEl.style.overflow = 'visible';
-			diffEl.style.contain = 'none';
-
-			// Give DOM a tick to layout
-			await new Promise(r => setTimeout(r, 60));
-
-			const fullHeight = diffEl.scrollHeight;
-			const fullWidth = Math.max(diffEl.scrollWidth, 1100);
-			const isDark = document.documentElement.classList.contains('dark');
-
-			const { toPng } = await import('html-to-image');
-			const dataUrl = await toPng(diffEl, {
-				quality: 1,
-				pixelRatio: 1.5,
-				height: fullHeight,
-				width: fullWidth,
-				backgroundColor: isDark ? '#141416' : '#ffffff',
-				style: {
-					maxHeight: 'none',
-					height: `${fullHeight}px`,
-					overflow: 'visible',
-					contain: 'none'
-				}
-			});
-
-			const fileA = appState.fileA ? appState.files.get(appState.fileA) : null;
-			const fileB = appState.fileB ? appState.files.get(appState.fileB) : null;
-			const titleA = fileA?.title || 'Original';
-			const titleB = fileB?.title || 'Changed';
-			const cleanName = `${titleA}_vs_${titleB}`.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-			const link = document.createElement('a');
-			link.download = `diff_${cleanName}_full.png`;
-			link.href = dataUrl;
-			link.click();
-
-			appState.statusMessage = 'Full diff image downloaded successfully!';
-		} catch (err) {
-			console.error('Export error:', err);
-			appState.statusMessage = 'Export failed: ' + (err instanceof Error ? err.message : 'Unknown error');
-		} finally {
-			// Restore scrollable constraints
-			diffEl.style.maxHeight = origMaxHeight;
-			diffEl.style.height = origHeight;
-			diffEl.style.overflow = origOverflow;
-			diffEl.style.contain = origContain;
-			isExporting = false;
-		}
-	}
-
-	function escapeHtml(str: string): string {
-		return str
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;')
-			.replace(/'/g, '&#039;');
-	}
-
-	/**
-	 * Export Standalone HTML (.html):
-	 * Self-contained HTML report with embedded styles, clean GitHub-grade theme, and no watermarks.
-	 */
-	function exportFullHtml() {
-		showExportMenu = false;
-		if (!appState.diffResult) return;
-
-		const fileA = appState.fileA ? appState.files.get(appState.fileA) : null;
-		const fileB = appState.fileB ? appState.files.get(appState.fileB) : null;
-		const titleA = fileA?.title || 'Original (A)';
-		const titleB = fileB?.title || 'Changed (B)';
-		const isDark = document.documentElement.classList.contains('dark');
-		const isSideBySide = appState.diffOutputFormat !== 'line-by-line';
-
-		// Clean up diff2html output: remove hardcoded light/dark scheme classes to let CSS variables take full control
-		const cleanedDiffHtml = appState.diffResult.html.replace(/\bd2h-(?:light|dark|auto)-color-scheme\b/g, '');
-
-		const columnHeaderHtml = isSideBySide
-			? `<div class="column-headers">
+    const columnHeaderHtml = isSideBySide
+      ? `<div class="column-headers">
 					<div class="col-header">
 						<span class="col-tag col-tag-a">A</span>
 						<span class="col-title" title="${escapeHtml(titleA)}">${escapeHtml(titleA)}</span>
@@ -234,13 +158,24 @@
 						<span class="col-title" title="${escapeHtml(titleB)}">${escapeHtml(titleB)}</span>
 					</div>
 				</div>`
-			: '';
+      : `<div class="column-headers" style="display: flex; gap: 12px; align-items: center;">
+					<div class="col-header" style="flex: 1; min-width: 0;">
+						<span class="col-tag col-tag-a">A</span>
+						<span class="col-title" title="${escapeHtml(titleA)}">${escapeHtml(titleA)}</span>
+					</div>
+					<span style="color: var(--color-text-muted); font-size: 11px; font-weight: 600;">→</span>
+					<div class="col-header" style="flex: 1; min-width: 0;">
+						<span class="col-tag col-tag-b">B</span>
+						<span class="col-title" title="${escapeHtml(titleB)}">${escapeHtml(titleB)}</span>
+					</div>
+				</div>`;
 
-		const htmlDocument = `<!DOCTYPE html>
-<html lang="en" class="${isDark ? 'dark' : ''}">
+    const htmlDocument = `<!DOCTYPE html>
+<html lang="en" class="${isDark ? "dark" : ""}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;">
   <title>${escapeHtml(titleA)} vs ${escapeHtml(titleB)} · Diff</title>
   <style>
 ${diff2htmlRawCss}
@@ -486,6 +421,13 @@ body {
   width: 100% !important;
 }
 
+.d2h-file-diff {
+  width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  background: var(--color-surface) !important;
+}
+
 .d2h-file-side-diff {
   width: 50% !important;
   flex: 1 1 50% !important;
@@ -529,19 +471,18 @@ body {
   min-height: 22px !important;
 }
 
-.d2h-code-side-linenumber,
-.d2h-code-linenumber {
+.d2h-code-side-linenumber {
   position: static !important;
   display: table-cell !important;
-  width: 3.5em !important;
-  min-width: 3.5em !important;
-  max-width: 3.5em !important;
+  width: 3.6em !important;
+  min-width: 3.6em !important;
+  max-width: 3.6em !important;
   box-sizing: border-box !important;
   direction: ltr !important;
   text-align: right !important;
   vertical-align: top !important;
-  padding: 2px 8px !important;
-  line-height: 1.45 !important;
+  padding: 2px 6px !important;
+  line-height: 18px !important;
   font-size: 11px !important;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace !important;
   user-select: none !important;
@@ -552,6 +493,54 @@ body {
   border-bottom: none !important;
 }
 
+.d2h-code-linenumber {
+  position: static !important;
+  display: table-cell !important;
+  width: 7.6em !important;
+  min-width: 7.6em !important;
+  max-width: 7.6em !important;
+  box-sizing: border-box !important;
+  direction: ltr !important;
+  vertical-align: top !important;
+  padding: 2px 0 !important;
+  line-height: 18px !important;
+  font-size: 11px !important;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace !important;
+  user-select: none !important;
+  white-space: nowrap !important;
+  background-color: var(--color-bg) !important;
+  color: var(--color-text-muted) !important;
+  border-right: 1px solid var(--color-border) !important;
+  border-top: none !important;
+  border-bottom: none !important;
+}
+
+.d2h-code-linenumber .line-num1,
+.d2h-code-linenumber .line-num2 {
+  display: inline-block !important;
+  width: 3.6em !important;
+  min-width: 3.6em !important;
+  max-width: 3.6em !important;
+  min-height: 18px !important;
+  box-sizing: border-box !important;
+  text-align: right !important;
+  padding: 0 4px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  line-height: 18px !important;
+  vertical-align: top !important;
+}
+
+.d2h-code-linenumber .line-num1 {
+  float: left !important;
+  border-right: 1px dashed var(--color-border) !important;
+}
+
+.d2h-code-linenumber .line-num2 {
+  float: right !important;
+}
+
 .d2h-code-side-line,
 .d2h-code-line {
   display: flex !important;
@@ -560,7 +549,7 @@ body {
   padding: 2px 6px !important;
   width: 100% !important;
   box-sizing: border-box !important;
-  line-height: 1.45 !important;
+  line-height: 18px !important;
 }
 
 .d2h-code-line-prefix {
@@ -573,7 +562,7 @@ body {
   user-select: none !important;
   font-weight: 700 !important;
   opacity: 0.8 !important;
-  line-height: 1.45 !important;
+  line-height: 18px !important;
 }
 
 .d2h-code-line-ctn {
@@ -583,7 +572,7 @@ body {
   white-space: pre-wrap !important;
   word-break: break-word !important;
   unicode-bidi: plaintext !important;
-  line-height: 1.45 !important;
+  line-height: 18px !important;
   color: var(--color-text) !important;
 }
 
@@ -591,24 +580,42 @@ body {
   background-color: var(--color-surface) !important;
 }
 
-.d2h-ins {
+.d2h-ins,
+.d2h-ins.d2h-change,
+.d2h-file-diff .d2h-ins.d2h-change,
+.d2h-file-diff tr.d2h-ins,
+.d2h-file-diff td.d2h-ins,
+.d2h-file-diff .d2h-ins {
   background-color: var(--diff-ins-bg) !important;
   border-color: transparent !important;
 }
 
 .d2h-ins .d2h-code-side-linenumber,
-.d2h-ins .d2h-code-linenumber {
+.d2h-ins.d2h-code-side-linenumber,
+.d2h-ins .d2h-code-linenumber,
+.d2h-ins.d2h-code-linenumber,
+.d2h-file-diff .d2h-code-linenumber.d2h-ins,
+.d2h-file-diff .d2h-ins .d2h-code-linenumber {
   background-color: var(--diff-ins-bg) !important;
   color: var(--diff-ins-fg) !important;
 }
 
-.d2h-del {
+.d2h-del,
+.d2h-del.d2h-change,
+.d2h-file-diff .d2h-del.d2h-change,
+.d2h-file-diff tr.d2h-del,
+.d2h-file-diff td.d2h-del,
+.d2h-file-diff .d2h-del {
   background-color: var(--diff-del-bg) !important;
   border-color: transparent !important;
 }
 
 .d2h-del .d2h-code-side-linenumber,
-.d2h-del .d2h-code-linenumber {
+.d2h-del.d2h-code-side-linenumber,
+.d2h-del .d2h-code-linenumber,
+.d2h-del.d2h-code-linenumber,
+.d2h-file-diff .d2h-code-linenumber.d2h-del,
+.d2h-file-diff .d2h-del .d2h-code-linenumber {
   background-color: var(--diff-del-bg) !important;
   color: var(--diff-del-fg) !important;
 }
@@ -649,8 +656,8 @@ ins, .d2h-ins ins {
           <span class="stat-pill stat-unc">=${appState.diffResult.unchanged} unchanged</span>
         </div>
         <button id="themeToggle" class="theme-btn" onclick="toggleTheme()" type="button" aria-label="Toggle Theme">
-          <span id="themeIcon">${isDark ? '☀️' : '🌙'}</span>
-          <span id="themeLabel">${isDark ? 'Light' : 'Dark'}</span>
+          <span id="themeIcon">${isDark ? "☀️" : "🌙"}</span>
+          <span id="themeLabel">${isDark ? "Light" : "Dark"}</span>
         </button>
       </div>
     </header>
@@ -689,162 +696,244 @@ ins, .d2h-ins ins {
       var isDark = document.documentElement.classList.contains('dark');
       updateThemeUI(isDark);
     })();
-  ${'<'}/script>
+  ${"<"}/script>
 </body>
 </html>`;
 
-		const blob = new Blob([htmlDocument], { type: 'text/html;charset=utf-8' });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement('a');
-		const cleanName = `${titleA}_vs_${titleB}`.replace(/[^a-zA-Z0-9_-]/g, '_');
-		link.download = `diff_${cleanName}.html`;
-		link.href = url;
-		link.click();
-		URL.revokeObjectURL(url);
-		appState.statusMessage = 'Full standalone HTML report exported!';
-	}
+    const blob = new Blob([htmlDocument], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const cleanName = `${titleA}_vs_${titleB}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+    link.download = `diff_${cleanName}.html`;
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    appState.statusMessage = "Full standalone HTML report exported!";
+  }
 
-	/**
-	 * Export Unified Patch (.diff):
-	 * Standard patch format for Git or text diffing tools.
-	 */
-	function exportPatch() {
-		showExportMenu = false;
-		const fileA = appState.fileA ? appState.files.get(appState.fileA) : null;
-		const fileB = appState.fileB ? appState.files.get(appState.fileB) : null;
-		if (!fileA || !fileB) return;
+  /**
+   * Export Unified Patch (.diff):
+   * Standard patch format for Git or text diffing tools.
+   */
+  function exportPatch() {
+    showExportMenu = false;
+    const fileA = appState.fileA ? appState.files.get(appState.fileA) : null;
+    const fileB = appState.fileB ? appState.files.get(appState.fileB) : null;
+    if (!fileA || !fileB) return;
 
-		const titleA = fileA.title || 'Original';
-		const titleB = fileB.title || 'Changed';
-		const textA = fileA.rawText || fileA.data.map(c => c.content || c.text).join('\n');
-		const textB = fileB.rawText || fileB.data.map(c => c.content || c.text).join('\n');
+    const titleA = sanitizePatchHeader(fileA.title || "Original");
+    const titleB = sanitizePatchHeader(fileB.title || "Changed");
 
-		import('diff').then(({ createTwoFilesPatch }) => {
-			const patch = createTwoFilesPatch(titleA, titleB, textA, textB, 'a/' + fileA.filename, 'b/' + fileB.filename);
-			const blob = new Blob([patch], { type: 'text/x-diff;charset=utf-8' });
-			const url = URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			const cleanName = `${titleA}_vs_${titleB}`.replace(/[^a-zA-Z0-9_-]/g, '_');
-			link.download = `diff_${cleanName}.diff`;
-			link.href = url;
-			link.click();
-			URL.revokeObjectURL(url);
-			appState.statusMessage = 'Unified .diff patch exported!';
-		});
-	}
+    const processedA = processLines(fileA.data, {
+      ...appState.options,
+      excludedStyles: appState.options.excludedStyles,
+      replace: appState.options.replace,
+    });
+    const processedB = processLines(fileB.data, {
+      ...appState.options,
+      excludedStyles: appState.options.excludedStyles,
+      replace: appState.options.replace,
+    });
 
-	// Close export menu on outside click
-	$effect(() => {
-		if (showExportMenu && typeof document !== 'undefined') {
-			function handleOutside(e: MouseEvent) {
-				if (exportMenuRef && !exportMenuRef.contains(e.target as Node)) {
-					showExportMenu = false;
-				}
-			}
-			document.addEventListener('mousedown', handleOutside);
-			return () => document.removeEventListener('mousedown', handleOutside);
-		}
-	});
+    const textA = (
+      processedA.lines.length > 0
+        ? processedA.lines
+        : (fileA.rawText || "").split(/\r?\n/)
+    ).join("\n");
+    const textB = (
+      processedB.lines.length > 0
+        ? processedB.lines
+        : (fileB.rawText || "").split(/\r?\n/)
+    ).join("\n");
 
-	const canCompare = $derived(appState.fileA !== null && appState.fileB !== null);
-	const hasFiles = $derived(appState.files.size > 0);
-	const hasDiffResult = $derived(appState.diffResult !== null && !appState.diffResult.isEmpty);
+    import("diff")
+      .then(({ createTwoFilesPatch }) => {
+        const headerA =
+          "a/" + sanitizePatchHeader(fileA.filename || "original.txt");
+        const headerB =
+          "b/" + sanitizePatchHeader(fileB.filename || "changed.txt");
+        const patch = createTwoFilesPatch(
+          titleA,
+          titleB,
+          textA,
+          textB,
+          headerA,
+          headerB,
+        );
+        const blob = new Blob([patch], { type: "text/x-diff;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const cleanName = `${titleA}_vs_${titleB}`.replace(
+          /[^a-zA-Z0-9_-]/g,
+          "_",
+        );
+        link.download = `diff_${cleanName}.diff`;
+        link.href = url;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        appState.statusMessage = "Unified .diff patch exported!";
+      })
+      .catch((err) => {
+        console.error("Patch export failed:", err);
+        appState.statusMessage = "Failed to generate patch.";
+      });
+  }
+
+  // Close export menu on outside click
+  $effect(() => {
+    if (showExportMenu && typeof document !== "undefined") {
+      function handleOutside(e: MouseEvent) {
+        if (exportMenuRef && !exportMenuRef.contains(e.target as Node)) {
+          showExportMenu = false;
+        }
+      }
+      document.addEventListener("mousedown", handleOutside);
+      return () => document.removeEventListener("mousedown", handleOutside);
+    }
+  });
+
+  const canCompare = $derived(
+    appState.fileA !== null && appState.fileB !== null,
+  );
+  const hasFiles = $derived(appState.files.size > 0);
+  const hasDiffResult = $derived(
+    appState.diffResult !== null && !appState.diffResult.isEmpty,
+  );
 </script>
 
 <div class="flex flex-wrap items-center gap-2">
-	<Button
-		onclick={findDifferences}
-		disabled={!canCompare || appState.isComputing}
-		size="sm"
-		class="gap-2 flex-1 sm:flex-none cursor-pointer"
-	>
-		{#if appState.isComputing}
-			<Loader2 class="h-4 w-4 animate-spin" />
-			Computing...
-		{:else}
-			<GitCompareArrows class="h-4 w-4" />
-			Find Differences
-		{/if}
-	</Button>
+  <Button
+    onclick={findDifferences}
+    disabled={!canCompare || appState.isComputing}
+    size="sm"
+    class="gap-2 flex-1 sm:flex-none cursor-pointer"
+  >
+    {#if appState.isComputing}
+      <Loader2 class="h-4 w-4 animate-spin" />
+      Computing...
+    {:else}
+      <GitCompareArrows class="h-4 w-4" />
+      Find Differences
+    {/if}
+  </Button>
 
-	{#if hasFiles}
-		<Button variant="outline" size="sm" onclick={swapFiles} disabled={!canCompare} class="gap-1.5 cursor-pointer">
-			<ArrowLeftRight class="h-3.5 w-3.5" />
-			<span class="hidden sm:inline">Swap</span>
-		</Button>
+  {#if hasFiles}
+    <Button
+      variant="outline"
+      size="sm"
+      onclick={swapFiles}
+      disabled={!canCompare}
+      class="gap-1.5 cursor-pointer"
+    >
+      <ArrowLeftRight class="h-3.5 w-3.5" />
+      <span class="hidden sm:inline">Swap</span>
+    </Button>
 
-		<!-- Export Menu Dropdown -->
-		{#if hasDiffResult}
-			<div bind:this={exportMenuRef} class="relative inline-block text-left">
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={() => showExportMenu = !showExportMenu}
-					disabled={isExporting}
-					class="gap-1.5 cursor-pointer border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
-				>
-					{#if isExporting}
-						<Loader2 class="h-3.5 w-3.5 animate-spin" />
-						<span>Exporting...</span>
-					{:else}
-						<Download class="h-3.5 w-3.5" />
-						<span>Export Full</span>
-						<ChevronDown class="h-3 w-3 opacity-60 transition-transform {showExportMenu ? 'rotate-180' : ''}" />
-					{/if}
-				</Button>
+    <!-- Export Menu Dropdown -->
+    {#if hasDiffResult}
+      <div bind:this={exportMenuRef} class="relative inline-block text-left">
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={() => (showExportMenu = !showExportMenu)}
+          disabled={isExporting}
+          class="gap-1.5 cursor-pointer border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+        >
+          {#if isExporting}
+            <Loader2 class="h-3.5 w-3.5 animate-spin" />
+            <span>Exporting...</span>
+          {:else}
+            <Download class="h-3.5 w-3.5" />
+            <span>Export Full</span>
+            <ChevronDown
+              class="h-3 w-3 opacity-60 transition-transform {showExportMenu
+                ? 'rotate-180'
+                : ''}"
+            />
+          {/if}
+        </Button>
 
-				{#if showExportMenu}
-					<div
-						class="absolute right-0 top-full mt-1.5 z-50 w-64 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-2xl p-1.5 space-y-1 animate-fade-in"
-						role="menu"
-					>
-						<div class="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-muted-foreground border-b border-border/50">
-							Select Export Format
-						</div>
+        {#if showExportMenu}
+          <div
+            class="absolute right-0 top-full mt-1.5 z-50 w-64 rounded-xl border border-border bg-popover/95 backdrop-blur-md shadow-2xl p-1.5 space-y-1 animate-fade-in"
+            role="menu"
+          >
+            <div
+              class="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-muted-foreground border-b border-border/50"
+            >
+              Select Export Format
+            </div>
 
-						<button
-							type="button"
-							onclick={exportFullImage}
-							class="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-muted text-left transition-colors cursor-pointer text-xs group"
-						>
-							<ImageDown class="h-4 w-4 text-indigo-500 mt-0.5 shrink-0" />
-							<div>
-								<div class="font-semibold text-foreground group-hover:text-primary">Full Image (PNG)</div>
-								<div class="text-[11px] text-muted-foreground">High-res, entire scrollable diff from line 1 to end</div>
-							</div>
-						</button>
+            <button
+              type="button"
+              onclick={exportFullImage}
+              class="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-muted text-left transition-colors cursor-pointer text-xs group"
+            >
+              <ImageDown class="h-4 w-4 text-indigo-500 mt-0.5 shrink-0" />
+              <div>
+                <div
+                  class="font-semibold text-foreground group-hover:text-primary"
+                >
+                  Full Image (PNG)
+                </div>
+                <div class="text-[11px] text-muted-foreground">
+                  High-res, entire scrollable diff from line 1 to end
+                </div>
+              </div>
+            </button>
 
-						<button
-							type="button"
-							onclick={exportFullHtml}
-							class="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-muted text-left transition-colors cursor-pointer text-xs group"
-						>
-							<FileCode class="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
-							<div>
-								<div class="font-semibold text-foreground group-hover:text-primary">Standalone HTML (.html)</div>
-								<div class="text-[11px] text-muted-foreground">Self-contained offline report with full diff & styling</div>
-							</div>
-						</button>
+            <button
+              type="button"
+              onclick={exportFullHtml}
+              class="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-muted text-left transition-colors cursor-pointer text-xs group"
+            >
+              <FileCode class="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+              <div>
+                <div
+                  class="font-semibold text-foreground group-hover:text-primary"
+                >
+                  Standalone HTML (.html)
+                </div>
+                <div class="text-[11px] text-muted-foreground">
+                  Self-contained offline report with full diff & styling
+                </div>
+              </div>
+            </button>
 
-						<button
-							type="button"
-							onclick={exportPatch}
-							class="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-muted text-left transition-colors cursor-pointer text-xs group"
-						>
-							<FileText class="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-							<div>
-								<div class="font-semibold text-foreground group-hover:text-primary">Unified Patch (.diff)</div>
-								<div class="text-[11px] text-muted-foreground">Standard git diff format for text/subtitle tools</div>
-							</div>
-						</button>
-					</div>
-				{/if}
-			</div>
-		{/if}
+            <button
+              type="button"
+              onclick={exportPatch}
+              class="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-muted text-left transition-colors cursor-pointer text-xs group"
+            >
+              <FileText class="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+              <div>
+                <div
+                  class="font-semibold text-foreground group-hover:text-primary"
+                >
+                  Unified Patch (.diff)
+                </div>
+                <div class="text-[11px] text-muted-foreground">
+                  Standard git diff format for text/subtitle tools
+                </div>
+              </div>
+            </button>
+          </div>
+        {/if}
+      </div>
+    {/if}
 
-		<Button variant="ghost" size="sm" onclick={clearAll} class="gap-1.5 text-destructive hover:text-destructive cursor-pointer">
-			<Trash2 class="h-3.5 w-3.5" />
-			<span class="hidden sm:inline">Clear</span>
-		</Button>
-	{/if}
+    <Button
+      variant="ghost"
+      size="sm"
+      onclick={clearAll}
+      class="gap-1.5 text-destructive hover:text-destructive cursor-pointer"
+    >
+      <Trash2 class="h-3.5 w-3.5" />
+      <span class="hidden sm:inline">Clear</span>
+    </Button>
+  {/if}
 </div>

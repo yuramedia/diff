@@ -80,15 +80,29 @@ const LANGUAGE_MAP: Record<string, string> = {
     uk: "Ukrainian"
 };
 
+function cleanTrackStr(str: string): string {
+    return str
+        .replace(/[\r\n\0]/g, " ")
+        .replace(/[<>]/g, "")
+        .trim();
+}
+
 export function getLanguageName(code: string): string {
     if (!code || code === "und") return "";
     const clean = code.toLowerCase().trim();
-    return LANGUAGE_MAP[clean] || code.toUpperCase();
+    if (LANGUAGE_MAP[clean]) return LANGUAGE_MAP[clean];
+    if (/^[a-z]{2,3}(-[a-z0-9]+)?$/i.test(clean)) {
+        return clean.toUpperCase();
+    }
+    return "";
 }
 
 export function formatTrackTitle(trackNum: number, name?: string, language?: string): string {
-    const langName = language ? getLanguageName(language) : "";
-    const cleanName = name?.trim() || "";
+    const cleanLang = language ? cleanTrackStr(language) : "";
+    const langName = cleanLang ? getLanguageName(cleanLang) : "";
+    const cleanName = name ? cleanTrackStr(name) : "";
+
+    const langSuffix = cleanLang && cleanLang !== "und" ? ` [${cleanLang}]` : "";
 
     if (langName && cleanName) {
         const normLang = langName.toLowerCase();
@@ -96,12 +110,12 @@ export function formatTrackTitle(trackNum: number, name?: string, language?: str
 
         // Exact match or redundant name
         if (normLang === normName) {
-            return `${langName} [${language}]`;
+            return `${langName}${langSuffix}`;
         }
 
         // If cleanName already starts with or contains langName (e.g. "Chinese (Traditional)")
         if (normName.startsWith(normLang)) {
-            return `${cleanName} [${language}]`;
+            return `${cleanName}${langSuffix}`;
         }
 
         // If langName already includes cleanName (e.g. lang="Chinese (Traditional)", name="Traditional")
@@ -111,14 +125,14 @@ export function formatTrackTitle(trackNum: number, name?: string, language?: str
             normLang.endsWith(normName) ||
             normName.includes(normLang)
         ) {
-            return `${langName} [${language}]`;
+            return `${langName}${langSuffix}`;
         }
 
-        return `${langName} (${cleanName}) [${language}]`;
+        return `${langName} (${cleanName})${langSuffix}`;
     }
 
     if (langName) {
-        return `${langName} [${language}]`;
+        return `${langName}${langSuffix}`;
     }
 
     if (cleanName) {

@@ -42,23 +42,28 @@ export function detectFormat(content: string): string {
 function parseTimeSrt(time: string): number {
     const match = time.trim().match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/);
     if (!match) return 0;
-    return parseInt(match[1]) * 3600000 + parseInt(match[2]) * 60000 + parseInt(match[3]) * 1000 + parseInt(match[4]);
+    const h = parseInt(match[1], 10);
+    const m = parseInt(match[2], 10);
+    const s = parseInt(match[3], 10);
+    const ms = parseInt(match[4], 10);
+    if (Number.isNaN(h) || Number.isNaN(m) || Number.isNaN(s) || Number.isNaN(ms)) return 0;
+    return h * 3600000 + m * 60000 + s * 1000 + ms;
 }
 
 function parseTimeAss(time: string): number {
     const match = time.trim().match(/(\d+):(\d{2}):(\d{2})\.(\d{2})/);
     if (!match) return 0;
-    return (
-        parseInt(match[1]) * 3600000 + parseInt(match[2]) * 60000 + parseInt(match[3]) * 1000 + parseInt(match[4]) * 10
-    );
+    const h = parseInt(match[1], 10);
+    const m = parseInt(match[2], 10);
+    const s = parseInt(match[3], 10);
+    const cs = parseInt(match[4], 10);
+    if (Number.isNaN(h) || Number.isNaN(m) || Number.isNaN(s) || Number.isNaN(cs)) return 0;
+    return h * 3600000 + m * 60000 + s * 1000 + cs * 10;
 }
 
 function stripAssTags(text: string): string {
     return text
-        .replace(
-            /\{[^}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3})[^}]*\}.*?\{[^}]*\\p0.*?(?<!\\p1)\}|\{[^}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3}).*$/g,
-            ""
-        )
+        .replace(/\{[^}]*\\p[1-9]\d*[^}]*\}[\s\S]*?(?:\{[^}]*\\p0[^}]*\}|$)/g, "")
         .replace(/\{[^}]*\}/g, "")
         .replace(/\\h/g, " ")
         .replace(/\s?\\n\s?/g, " ")
@@ -107,12 +112,30 @@ export function parseSrt(content: string): Caption[] {
 
 export function parseVtt(content: string): Caption[] {
     const captions: Caption[] = [];
-    // Remove WEBVTT header and any metadata
-    const body = content.replace(/^WEBVTT[^\r\n]*(\r?\n)*/, "").replace(/^NOTE[^\r\n]*(\r?\n[^\r\n]*)*(\r?\n)*/gm, "");
-    const blocks = body.trim().split(/\r?\n\r?\n/);
+    const blocks = content.trim().split(/\r?\n\r?\n/);
+
+    const parseVttTime = (t: string): number => {
+        const cleaned = t.trim().split(" ")[0]; // Remove position info
+        const parts = cleaned.split(":");
+        if (parts.length === 2) {
+            // mm:ss.mmm
+            const min = parseInt(parts[0], 10);
+            const secMs = parts[1].split(".");
+            const sec = parseInt(secMs[0] || "0", 10);
+            const ms = parseInt(secMs[1] || "0", 10);
+            if (Number.isNaN(min) || Number.isNaN(sec) || Number.isNaN(ms)) return 0;
+            return min * 60000 + sec * 1000 + ms;
+        }
+        return parseTimeSrt(cleaned);
+    };
 
     for (const block of blocks) {
-        const lines = block.trim().split(/\r?\n/);
+        const trimmed = block.trim();
+        if (!trimmed) continue;
+        // Skip WEBVTT header and NOTE blocks cleanly without eating subsequent cues
+        if (trimmed.startsWith("WEBVTT") || trimmed.startsWith("NOTE")) continue;
+
+        const lines = trimmed.split(/\r?\n/);
         if (lines.length < 1) continue;
 
         let timeLineIndex = -1;
@@ -126,19 +149,6 @@ export function parseVtt(content: string): Caption[] {
 
         const timeParts = lines[timeLineIndex].split("-->");
         if (timeParts.length !== 2) continue;
-
-        // Handle VTT time which might not have hours
-        const parseVttTime = (t: string): number => {
-            const cleaned = t.trim().split(" ")[0]; // Remove position info
-            const parts = cleaned.split(":");
-            if (parts.length === 2) {
-                // mm:ss.mmm
-                const [min, secMs] = parts;
-                const [sec, ms] = secMs.split(".");
-                return parseInt(min) * 60000 + parseInt(sec) * 1000 + parseInt(ms || "0");
-            }
-            return parseTimeSrt(cleaned);
-        };
 
         const text = lines.slice(timeLineIndex + 1).join("\n");
         const strippedText = stripHtmlTags(text);

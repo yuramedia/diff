@@ -135,17 +135,24 @@ function readEbmlVint(buf: Uint8Array, offset: number): { value: number; length:
 
     if (length > 8 || offset + length > buf.length) return null;
 
-    // Mask out marker bit for size
-    let value = first & (mask - 1);
-    for (let i = 1; i < length; i++) {
-        value = value * 256 + buf[offset + i];
-    }
-
     // Check for "unknown size" (all value bits are 1)
     const isUnknown =
         (first & (mask - 1)) === mask - 1 && buf.subarray(offset + 1, offset + length).every(b => b === 0xff);
 
-    return { value: isUnknown ? -1 : value, length };
+    if (isUnknown) {
+        return { value: -1, length };
+    }
+
+    // Mask out marker bit for size
+    let value = first & (mask - 1);
+    for (let i = 1; i < length; i++) {
+        value = value * 256 + buf[offset + i];
+        if (value > Number.MAX_SAFE_INTEGER) {
+            return null; // integer overflow
+        }
+    }
+
+    return { value, length };
 }
 
 function readBigEndianUint(buf: Uint8Array, offset: number, size: number): number {
@@ -241,14 +248,18 @@ export async function extractMkvSubtitles(file: File): Promise<ParsedSubtitle[]>
         }
 
         if (elemId === ID_TRACKS) {
-            // Parse Tracks
+            // Parse Tracks - clamp header allocation to 10MB max
+            if (elemSize <= 0 || elemSize > 10 * 1024 * 1024) {
+                offset = dataOffset + Math.max(0, elemSize);
+                continue;
+            }
             const tracksData = await reader.readBytes(dataOffset, elemSize);
             let p = 0;
             while (p < tracksData.length) {
                 const tId = readEbmlId(tracksData, p);
                 if (!tId) break;
                 const tSize = readEbmlVint(tracksData, p + tId.length);
-                if (!tSize) break;
+                if (!tSize || tSize.value < 0) break;
                 const tOffset = p + tId.length + tSize.length;
 
                 if (tId.id === ID_TRACKENTRY) {
@@ -345,39 +356,57 @@ export async function extractMkvSubtitles(file: File): Promise<ParsedSubtitle[]>
                 const cDataOffset = cp + cId.length + cSize.length;
                 const cElemSize = cSize.value;
 
+                if (cElemSize <= 0 || cDataOffset + cElemSize > clusterEnd) {
+                    // Unknown or invalid size inside cluster: break out safely
+                    break;
+                }
+
                 if (cId.id === ID_TIMECODE) {
-                    const tBytes = await reader.readBytes(cDataOffset, cElemSize);
-                    clusterTimecode = readBigEndianUint(tBytes, 0, cElemSize);
+                    if (cElemSize <= 8) {
+                        const tBytes = await reader.readBytes(cDataOffset, cElemSize);
+                        clusterTimecode = readBigEndianUint(tBytes, 0, cElemSize);
+                    }
                     cp = cDataOffset + cElemSize;
                     continue;
                 }
 
                 if (cId.id === ID_SIMPLEBLOCK || cId.id === ID_BLOCK) {
+                    if (cElemSize > 5 * 1024 * 1024) {
+                        cp = cDataOffset + cElemSize;
+                        continue;
+                    }
+
                     // Read block header
                     const blockHeader = await reader.readBytes(cDataOffset, Math.min(10, cElemSize));
                     const trackVint = readEbmlVint(blockHeader, 0);
                     if (trackVint && tracks.has(trackVint.value)) {
                         const trackNum = trackVint.value;
                         const relTimeOffset = trackVint.length;
-                        const relTime = (blockHeader[relTimeOffset] << 8) | blockHeader[relTimeOffset + 1];
-                        const signedRelTime = relTime >= 0x8000 ? relTime - 0x10000 : relTime;
-                        const flagsOffset = relTimeOffset + 2;
+                        if (blockHeader.length >= relTimeOffset + 3) {
+                            const relTime = (blockHeader[relTimeOffset] << 8) | blockHeader[relTimeOffset + 1];
+                            const signedRelTime = relTime >= 0x8000 ? relTime - 0x10000 : relTime;
+                            const flagsOffset = relTimeOffset + 2;
 
-                        const payloadStart = cDataOffset + flagsOffset + 1;
-                        const payloadSize = cElemSize - (flagsOffset + 1);
+                            const payloadStart = cDataOffset + flagsOffset + 1;
+                            const payloadSize = cElemSize - (flagsOffset + 1);
 
-                        if (payloadSize > 0) {
-                            const payloadBytes = await reader.readBytes(payloadStart, payloadSize);
-                            const payloadStr = new TextDecoder("utf-8", { fatal: false }).decode(payloadBytes);
-                            const scaleMs = timecodeScaleNs / 1_000_000;
-                            const timeMs = (clusterTimecode + signedRelTime) * scaleMs;
+                            if (
+                                payloadSize > 0 &&
+                                payloadSize <= 5 * 1024 * 1024 &&
+                                payloadStart + payloadSize <= reader.size
+                            ) {
+                                const payloadBytes = await reader.readBytes(payloadStart, payloadSize);
+                                const payloadStr = new TextDecoder("utf-8", { fatal: false }).decode(payloadBytes);
+                                const scaleMs = timecodeScaleNs / 1_000_000;
+                                const timeMs = (clusterTimecode + signedRelTime) * scaleMs;
 
-                            lines.push({
-                                trackNumber: trackNum,
-                                timeMs,
-                                durationMs: 0,
-                                payload: payloadStr
-                            });
+                                lines.push({
+                                    trackNumber: trackNum,
+                                    timeMs,
+                                    durationMs: 0,
+                                    payload: payloadStr
+                                });
+                            }
                         }
                     }
                     cp = cDataOffset + cElemSize;
@@ -385,6 +414,11 @@ export async function extractMkvSubtitles(file: File): Promise<ParsedSubtitle[]>
                 }
 
                 if (cId.id === ID_BLOCKGROUP) {
+                    if (cElemSize > 5 * 1024 * 1024) {
+                        cp = cDataOffset + cElemSize;
+                        continue;
+                    }
+
                     // Parse BlockGroup for Block + Duration
                     const bgBytes = await reader.readBytes(cDataOffset, cElemSize);
                     let bgp = 0;
@@ -395,7 +429,7 @@ export async function extractMkvSubtitles(file: File): Promise<ParsedSubtitle[]>
                         const bId = readEbmlId(bgBytes, bgp);
                         if (!bId) break;
                         const bSize = readEbmlVint(bgBytes, bgp + bId.length);
-                        if (!bSize) break;
+                        if (!bSize || bSize.value < 0) break;
                         const bDataOffset = bgp + bId.length + bSize.length;
 
                         if (bId.id === ID_BLOCK) {
@@ -403,16 +437,18 @@ export async function extractMkvSubtitles(file: File): Promise<ParsedSubtitle[]>
                             if (trackVint && tracks.has(trackVint.value)) {
                                 const trackNum = trackVint.value;
                                 const relTimeOffset = bDataOffset + trackVint.length;
-                                const relTime = (bgBytes[relTimeOffset] << 8) | bgBytes[relTimeOffset + 1];
-                                const signedRelTime = relTime >= 0x8000 ? relTime - 0x10000 : relTime;
-                                const flagsOffset = relTimeOffset + 2;
-                                const pStart = flagsOffset + 1;
-                                const pSize = bDataOffset + bSize.value - pStart;
-                                if (pSize > 0) {
-                                    const pStr = new TextDecoder("utf-8", { fatal: false }).decode(
-                                        bgBytes.subarray(pStart, pStart + pSize)
-                                    );
-                                    groupBlock = { trackNum, relTime: signedRelTime, payload: pStr };
+                                if (bgBytes.length >= relTimeOffset + 3) {
+                                    const relTime = (bgBytes[relTimeOffset] << 8) | bgBytes[relTimeOffset + 1];
+                                    const signedRelTime = relTime >= 0x8000 ? relTime - 0x10000 : relTime;
+                                    const flagsOffset = relTimeOffset + 2;
+                                    const pStart = flagsOffset + 1;
+                                    const pSize = bDataOffset + bSize.value - pStart;
+                                    if (pSize > 0 && pStart + pSize <= bgBytes.length) {
+                                        const pStr = new TextDecoder("utf-8", { fatal: false }).decode(
+                                            bgBytes.subarray(pStart, pStart + pSize)
+                                        );
+                                        groupBlock = { trackNum, relTime: signedRelTime, payload: pStr };
+                                    }
                                 }
                             }
                         } else if (bId.id === ID_BLOCKDURATION) {

@@ -8,9 +8,13 @@
 
 	onMount(() => {
 		// Restore theme
-		const saved = localStorage.getItem('diff-theme');
-		if (saved === 'light' || saved === 'dark') {
-			appState.theme = saved;
+		try {
+			const saved = localStorage.getItem('diff-theme');
+			if (saved === 'light' || saved === 'dark') {
+				appState.theme = saved;
+			}
+		} catch {
+			// Ignore localStorage access errors in private browsing
 		}
 	});
 

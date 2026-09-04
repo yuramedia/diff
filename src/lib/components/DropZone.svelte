@@ -52,6 +52,10 @@
 			const normalized = file.name.toLowerCase();
 
 			if (normalized.endsWith('.mkv') || normalized.endsWith('.mks')) {
+				if (file.size > 2 * 1024 * 1024 * 1024) {
+					appState.statusMessage = `File "${file.name}" exceeds 2GB maximum limit.`;
+					continue;
+				}
 				try {
 					const subs = await extractMkvSubtitles(file);
 					for (const sub of subs) {
@@ -70,6 +74,10 @@
 				normalized.endsWith('.srt') || normalized.endsWith('.vtt') ||
 				normalized.endsWith('.txt')
 			) {
+				if (file.size > 25 * 1024 * 1024) {
+					appState.statusMessage = `File "${file.name}" exceeds 25MB maximum limit.`;
+					continue;
+				}
 				const text = await file.text();
 				await addSubtitleFile(file.name, text);
 			}
@@ -106,6 +114,10 @@
 	function handlePaste(e: ClipboardEvent) {
 		const paste = e.clipboardData?.getData('text');
 		if (!paste?.trim()) return;
+		if (paste.length > 10_000_000) {
+			appState.statusMessage = 'Pasted text exceeds 10MB limit.';
+			return;
+		}
 		addSubtitleFile('clipboard.txt', paste, undefined, 'Clipboard');
 	}
 
