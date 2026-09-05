@@ -22,22 +22,22 @@
         "format:check": "oxfmt --check"
     },
     "devDependencies": {
-        "@internationalized/date": "^3.12.0",
+        "@internationalized/date": "^3.12.4",
         "@sveltejs/adapter-auto": "^7.0.1",
         "@sveltejs/adapter-static": "^3.0.10",
-        "@sveltejs/kit": "^2.63.0",
-        "@sveltejs/vite-plugin-svelte": "^7.1.2",
+        "@sveltejs/kit": "^2.70.3",
+        "@sveltejs/vite-plugin-svelte": "^7.3.0",
         "@tailwindcss/typography": "^0.5.20",
         "@tailwindcss/vite": "^4.3.3",
         "@types/dompurify": "^3.2.0",
         "eslint-plugin-svelte": "^3.23.0",
         "oxfmt": "^0.66.0",
         "oxlint": "^1.81.0",
-        "svelte": "^5.56.1",
-        "svelte-check": "^4.6.0",
+        "svelte": "^5.57.0",
+        "svelte-check": "^4.7.6",
         "tailwindcss": "^4.3.3",
         "typescript": "^6.0.3",
-        "vite": "^8.0.16"
+        "vite": "^8.2.2"
     },
     "dependencies": {
         "bits-ui": "^2.19.0",
